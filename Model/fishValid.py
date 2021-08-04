@@ -16,21 +16,21 @@ if not os.path.exists('./fish_img'):
 
 def toImg(x):
     x = x.clamp(0, 1)
-    x = x.view(x.size(0), 1, 128, 128)
+    x = x.view(x.size(0), 1, 64, 64)
     return x
 
 # Parameters
 
 epochsNum = 30000
-batchSize = 64
+batchSize = 32
 learningRate = 0.0005
 
-inputDim = 128*128
+inputDim = 64*64
 latentDim = 20
 
 # Data Loading
 
-fishData = np.load("fishData128.npy", allow_pickle=True).item()
+fishData = np.load("fishData64.npy", allow_pickle=True).item()
 data = np.array(fishData['Data'])
 label = np.array(fishData['Label'])
 
@@ -114,32 +114,75 @@ if torch.cuda.is_available():
 else:
     print('cuda is unavailable!')
 
-reconstruction_function = nn.MSELoss(size_average=False)
+# reconstruction_function = nn.MSELoss(size_average=False)
 
-def calLoss(genImg, img, mu, logvar, label, preLabel):
-    ####################################
-    # genImg: generating images
-    # Img: origin images
-    # mu: latent mean
-    # logvar: latent log variance
-    ####################################
-    BCE = reconstruction_function(genImg, img)  # mse loss
-    # loss = 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-    KLDElement = mu.pow(2).add_(logvar.exp()).mul_(-1).add_(1).add_(logvar)
-    KLD = torch.sum(KLDElement).mul_(- 0.5)
-    # KL divergence
-    # Label loss
-    SmoothL = torch.tensor(F.smooth_l1_loss(label, preLabel, reduction='sum'), dtype=torch.double)
+# def calLoss(genImg, img, mu, logvar, label, preLabel):
+#     ####################################
+#     # genImg: generating images
+#     # Img: origin images
+#     # mu: latent mean
+#     # logvar: latent log variance
+#     ####################################
+#     BCE = reconstruction_function(genImg, img)  # mse loss
+#     # loss = 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+#     KLDElement = mu.pow(2).add_(logvar.exp()).mul_(-1).add_(1).add_(logvar)
+#     KLD = torch.sum(KLDElement).mul_(- 0.5)
+#     # KL divergence
+#     # Label loss
+#     SmoothL = torch.tensor(F.smooth_l1_loss(label, preLabel, reduction='sum'), dtype=torch.double)
 
-    return BCE + KLD + SmoothL * 10
+#     return BCE + KLD + SmoothL * 10
 
-optimizer = torch.optim.Adam(model.parameters(), lr=learningRate)
+# optimizer = torch.optim.Adam(model.parameters(), lr=learningRate)
 
-for epoch in range(epochsNum):
-    model.train()
-    trainLoss = 0
+# for epoch in range(epochsNum):
+#     model.train()
+#     trainLoss = 0
     
-    for batch_idx, data in enumerate(trainData):    
+#     for batch_idx, data in enumerate(trainData):    
+#         img, label = data
+#         # print(label)
+#         img = img.view(img.size(0), -1)
+#         img = Variable(img)
+#         img = (img.cuda() if torch.cuda.is_available() else img)
+#         label = Variable(label)
+#         label = (label.cuda() if torch.cuda.is_available() else label)
+        
+#         optimizer.zero_grad()
+        
+#         genImg, mu, logvar, preLabel = model(img)
+        
+#         loss = calLoss(genImg, img, mu, logvar, label, preLabel)
+#         loss.backward()
+#         trainLoss += loss.item()
+#         optimizer.step()
+
+#         if batch_idx % 50 == 0:
+#             endtime = datetime.datetime.now()
+#             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f} time:{:.2f}s'.format(
+#                 epoch,
+#                 batch_idx * len(img),
+#                 len(trainData.dataset), 
+#                 100. * batch_idx / len(trainData),
+#                 loss.item() / len(img), 
+#                 (endtime-strattime).seconds))
+#     print('====> Epoch: {} Average loss: {:.4f}'.format(epoch, trainLoss / len(trainData.dataset)))
+    
+#     if epoch % 1000 == 0:
+#         save1 = toImg(img)
+#         save2 = toImg(genImg.cpu().data)
+#         save_image(save1, './fish_img/image_{}.png'.format(epoch))
+#         save_image(save2, './fish_img/original_image_{}.png'.format(epoch))
+
+#     if epoch != 0 and epoch % 1000 == 0:
+#         lossFunc = nn.MSELoss(reduction='mean')
+#         print('Training Accuracy: {}'.format(lossFunc(label, preLabel)))
+
+# # Save model
+# torch.save(model.state_dict(), './fishvae.pth')
+model.load_state_dict(torch.load('./fishvae.pth'))
+for batch_idx, data in enumerate(validData):
+        errorV = 0
         img, label = data
         # print(label)
         img = img.view(img.size(0), -1)
@@ -148,35 +191,11 @@ for epoch in range(epochsNum):
         label = Variable(label)
         label = (label.cuda() if torch.cuda.is_available() else label)
         
-        optimizer.zero_grad()
-        
         genImg, mu, logvar, preLabel = model(img)
         
-        loss = calLoss(genImg, img, mu, logvar, label, preLabel)
-        loss.backward()
-        trainLoss += loss.item()
-        optimizer.step()
-
-        if batch_idx % 50 == 0:
-            endtime = datetime.datetime.now()
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f} time:{:.2f}s'.format(
-                epoch,
-                batch_idx * len(img),
-                len(trainData.dataset), 
-                100. * batch_idx / len(trainData),
-                loss.item() / len(img), 
-                (endtime-strattime).seconds))
-    print('====> Epoch: {} Average loss: {:.4f}'.format(epoch, trainLoss / len(trainData.dataset)))
-    
-    if epoch % 1000 == 0:
-        save1 = toImg(img)
-        save2 = toImg(genImg.cpu().data)
-        save_image(save1, './fish_img/image_{}.png'.format(epoch))
-        save_image(save2, './fish_img/original_image_{}.png'.format(epoch))
-
-    if epoch != 0 and epoch % 1000 == 0:
         lossFunc = nn.MSELoss(reduction='mean')
-        print('Training Accuracy: {}'.format(lossFunc(label, preLabel)))
+        errorV = lossFunc(label, preLabel)
 
-# Save model
-torch.save(model.state_dict(), './fishvae.pth')
+        print(label)
+        print(preLabel)
+        print("The MSE Loss is {}".format(errorV))
