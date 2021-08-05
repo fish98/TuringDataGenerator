@@ -26,7 +26,7 @@ batchSize = 64
 learningRate = 0.0005
 
 inputDim = 128*128
-latentDim = 16
+latentDim = 20
 
 # Data Loading
 
@@ -62,22 +62,19 @@ validData = torchdata.DataLoader(tmpvalid, batch_size=batchSize, num_workers=24)
 class VAE(nn.Module):
     def __init__(self):
         super(VAE, self).__init__()
-        self.fc1 = nn.Linear(inputDim, 1024)
-        self.fc11 = nn.Linear(1024, 256)
-        self.fc12 = nn.Linear(256, 64)
-        self.fc21 = nn.Linear(64, latentDim)
-        self.fc22 = nn.Linear(64, latentDim)
-        self.fc3 = nn.Linear(latentDim, 64)
-        self.fc31 = nn.Linear(64, 256)
-        self.fc32 = nn.Linear(256, 1024)
-        self.fc4 = nn.Linear(1024, inputDim)
+        # self.fc1 = nn.Linear(inputDim, 800)
+        # self.fc11 = nn.Linear(800, 200)
+        # self.fc21 = nn.Linear(200, latentDim)
+        # self.fc22 = nn.Linear(200, latentDim)
+        # self.fc3 = nn.Linear(latentDim, 200)
+        # self.fc31 = nn.Linear(200, 800)
+        # self.fc4 = nn.Linear(800, inputDim)
         self.convertZ = nn.Linear(latentDim, 4)
 
     def encode(self, x):
         tmp1 = F.relu(self.fc1(x))
         tmp2 = F.relu(self.fc11(tmp1))
-        tmp3 = F.relu(self.fc12(tmp2))
-        return self.fc21(tmp3), self.fc22(tmp3)
+        return self.fc21(tmp2), self.fc22(tmp2)
 
     def deParametrize(self, mu, logvar):
         std = logvar.mul(0.5).exp_()
@@ -89,10 +86,9 @@ class VAE(nn.Module):
         return eps.mul(std).add_(mu)
 
     def decode(self, latent):
-        tmp4 = F.relu(self.fc3(latent))
-        tmp5 = F.relu(self.fc31(tmp4))
-        tmp6 = F.relu(self.fc32(tmp5))
-        return torch.sigmoid(self.fc4(tmp6))
+        tmp3 = F.relu(self.fc3(latent))
+        tmp4 = F.relu(self.fc31(tmp3))
+        return torch.sigmoid(self.fc4(tmp4))
 
     def convertLantent(self, latent):
         labels = self.convertZ(latent)
