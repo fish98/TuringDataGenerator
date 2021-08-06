@@ -178,7 +178,7 @@ for epoch in range(epochsNum):
         save_image(save1, './fish_img/image_{}.png'.format(epoch))
         save_image(save2, './fish_img/original_image_{}.png'.format(epoch))
 
-    if epoch != 0 and epoch % 1000 == 0:
+    if epoch != 0 and epoch % 500 == 0:
         lossFunc = nn.MSELoss(reduction='mean')
         print('Training Accuracy: {}'.format(lossFunc(label, preLabel)))
 

@@ -22,11 +22,11 @@ def toImg(x):
 # Parameters
 
 epochsNum = 30000
-batchSize = 64
+batchSize = 60
 learningRate = 0.0005
 
 inputDim = 128*128
-latentDim = 20
+latentDim = 16
 
 # Data Loading
 
@@ -62,19 +62,41 @@ validData = torchdata.DataLoader(tmpvalid, batch_size=batchSize, num_workers=24)
 class VAE(nn.Module):
     def __init__(self):
         super(VAE, self).__init__()
-        # self.fc1 = nn.Linear(inputDim, 800)
-        # self.fc11 = nn.Linear(800, 200)
-        # self.fc21 = nn.Linear(200, latentDim)
-        # self.fc22 = nn.Linear(200, latentDim)
-        # self.fc3 = nn.Linear(latentDim, 200)
-        # self.fc31 = nn.Linear(200, 800)
-        # self.fc4 = nn.Linear(800, inputDim)
+        self.indice = 0
+        self.conv1 = nn.Conv2d(1, 8, 5)
+        self.conv2 = nn.Conv2d(8, 16, 5)
+
+        self.maxPool = nn.MaxPool2d(3, 3, return_indices=True)
+        self.maxUnPool = nn.MaxUnpool2d(3, 3)
+
+        self.reconv1 = nn.ConvTranspose2d(16, 8, 5)
+        self.reconv2 = nn.ConvTranspose2d(8, 1, 5)
+
+        self.fc1 = nn.Linear(16 * 40 * 40 , 2048)
+        self.fc11 = nn.Linear(2048, 512)
+        self.fc12 = nn.Linear(512, 128)
+        self.fc21 = nn.Linear(128, latentDim)
+        self.fc22 = nn.Linear(128, latentDim)
+
+        self.fc3 = nn.Linear(latentDim, 128)
+        self.fc31 = nn.Linear(128, 512)
+        self.fc32 = nn.Linear(512, 2048)
+        self.fc4 = nn.Linear(2048, 16*40*40)
+
         self.convertZ = nn.Linear(latentDim, 4)
 
     def encode(self, x):
-        tmp1 = F.relu(self.fc1(x))
-        tmp2 = F.relu(self.fc11(tmp1))
-        return self.fc21(tmp2), self.fc22(tmp2)
+        x1 = torch.reshape(x, (batchSize, 1, 128, 128))
+        tmp1 = F.relu(self.conv1(x1))
+        tmp2 = F.relu(self.conv2(tmp1))
+        tmp3, indice = self.maxPool(tmp2)
+        self.indice = indice 
+        tmp3 = F.relu(tmp3)
+        x2 = torch.reshape(tmp3, (batchSize, 16 * 40 * 40))
+        tmp4 = F.relu(self.fc1(x2))
+        tmp5 = F.relu(self.fc11(tmp4))
+        tmp6 = F.relu(self.fc12(tmp5))
+        return self.fc21(tmp6), self.fc22(tmp6)
 
     def deParametrize(self, mu, logvar):
         std = logvar.mul(0.5).exp_()
@@ -86,9 +108,15 @@ class VAE(nn.Module):
         return eps.mul(std).add_(mu)
 
     def decode(self, latent):
-        tmp3 = F.relu(self.fc3(latent))
-        tmp4 = F.relu(self.fc31(tmp3))
-        return torch.sigmoid(self.fc4(tmp4))
+        tmp7 = F.relu(self.fc3(latent))
+        tmp8 = F.relu(self.fc31(tmp7))
+        tmp9 = F.relu(self.fc32(tmp8))
+        tmp10 = F.relu(self.fc4(tmp9))
+        x3 = torch.reshape(tmp10, (batchSize, 16, 40, 40))
+        tmp11 = F.relu(self.maxUnPool(x3, self.indice))
+        tmp12 = F.relu(self.reconv1(tmp11))
+        out = torch.reshape(torch.sigmoid(self.reconv2(tmp12)), (batchSize, 128 * 128))
+        return out
 
     def convertLantent(self, latent):
         labels = self.convertZ(latent)
@@ -168,13 +196,13 @@ for epoch in range(epochsNum):
                 (endtime-strattime).seconds))
     print('====> Epoch: {} Average loss: {:.4f}'.format(epoch, trainLoss / len(trainData.dataset)))
     
-    if epoch % 1000 == 0:
+    if epoch % 5000 == 0:
         save1 = toImg(img)
         save2 = toImg(genImg.cpu().data)
         save_image(save1, './fish_img/image_{}.png'.format(epoch))
         save_image(save2, './fish_img/original_image_{}.png'.format(epoch))
 
-    if epoch != 0 and epoch % 1000 == 0:
+    if epoch != 0 and epoch % 10 == 0:
         lossFunc = nn.MSELoss(reduction='mean')
         print('Training Accuracy: {}'.format(lossFunc(label, preLabel)))
 
