@@ -1,4 +1,5 @@
 import logging
+import sys
 
 import numpy as np
 import torch
@@ -11,7 +12,7 @@ from tqdm import tqdm
 
 # Setup
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-logging.basicConfig(format='%(asctime)s %(message)s', handlers=[logging.StreamHandler()])
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG, format='%(asctime)s %(message)s')
 
 
 # Data
