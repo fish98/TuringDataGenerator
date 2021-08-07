@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import torch
 from torch import nn
@@ -7,16 +8,10 @@ import torch.utils.data as torchdata
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
+
+# Setup
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-
-# if not os.path.exists('./fish_img'):
-#     os.mkdir('./fish_img')
-
-
-def toImg(x):
-    x = x.clamp(0, 1)
-    x = x.view(x.size(0), 1, 128, 128)
-    return x
+logging.basicConfig(format='%(asctime)s %(message)s', handlers=[logging.StreamHandler()])
 
 # Data
 class fishDataset(torchdata.Dataset):
@@ -35,6 +30,7 @@ class fishDataset(torchdata.Dataset):
 
     def __len__(self):
         return len(self.idx)
+
 
 # Model
 class VAE(nn.Module):
@@ -61,7 +57,13 @@ class VAE(nn.Module):
         self.fc32 = nn.Linear(512, 2048)
         self.fc4 = nn.Linear(2048, 16 * 40 * 40)
 
-        self.convertZ = nn.Linear(latentDim, 4)
+        # self.convertZ = nn.Linear(latentDim, 4)
+        self.convertZ = nn.Sequential(
+            nn.Linear(latentDim, 20),
+            nn.Linear(20, 20),
+            nn.Linear(20, 20),
+            nn.Linear(20, 4),
+        )
 
     def encode(self, x):
         x1 = torch.reshape(x, (batchSize, 1, 128, 128))
@@ -76,8 +78,8 @@ class VAE(nn.Module):
         tmp6 = F.relu(self.fc12(tmp5))
         return self.fc21(tmp6), self.fc22(tmp6)
 
-    def deParametrize(self, mu, logvar):
-        std = logvar.mul(0.5).exp_()
+    def deparametrize(self, mu, log_var):
+        std = log_var.mul(0.5).exp_()
         if torch.cuda.is_available():
             eps = torch.cuda.FloatTensor(std.size()).normal_()
         else:
@@ -96,20 +98,20 @@ class VAE(nn.Module):
         out = torch.reshape(torch.sigmoid(self.reconv2(tmp12)), (batchSize, 128 * 128))
         return out
 
-    def convertLantent(self, latent):
+    def convert_lantent(self, latent):
         labels = self.convertZ(latent)
         labels = Variable(labels)
         return labels
 
     def forward(self, x):
-        mu, logvar = self.encode(x)
-        latent = self.deParametrize(mu, logvar)
-        preLabel = self.convertLantent(latent)
-        # print(preLabel)
-        return self.decode(latent), mu, logvar, preLabel
+        mu, log_var = self.encode(x)
+        latent = self.deparametrize(mu, log_var)
+        pre_label = self.convert_lantent(latent)
+        return self.decode(latent), mu, log_var, pre_label
+
 
 # Loss
-def calLoss(genImg, img, mu, logvar, label, preLabel):
+def cal_loss(genImg, img, mu, logvar, label, preLabel, epoch):
     ####################################
     # genImg: generating images
     # Img: origin images
@@ -125,14 +127,14 @@ def calLoss(genImg, img, mu, logvar, label, preLabel):
     # Label loss
     SmoothL = torch.tensor(F.smooth_l1_loss(label, preLabel, reduction='sum'), dtype=torch.double)
 
-    return BCE + KLD + SmoothL * 10
+    return BCE + KLD + SmoothL * (10 if epoch < 10 else 100)
 
 
 if __name__ == '__main__':
     # Parameters
     epochsNum = 30000
     batchSize = 60
-    learningRate = 0.0005
+    learningRate = 0.0001
 
     inputDim = 128 * 128
     latentDim = 16
@@ -152,32 +154,32 @@ if __name__ == '__main__':
     writer = SummaryWriter()
 
     if torch.cuda.is_available():
-        print('cuda is OK!')
+        logging.info('cuda is OK!')
         model = model.to('cuda')
     else:
-        print('cuda is unavailable!')
+        logging.warning('cuda is unavailable!')
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learningRate)
 
+    model.train()
+
     global_step = 0
     for epoch in range(epochsNum):
-        model.train()
+        logging.info(f'Executing {epoch}/{epochsNum} epoch')
         epoch_loss = 0
 
-        for batch_idx, data in tqdm(enumerate(trainData)):
+        for batch_idx, data in enumerate(tqdm(trainData)):
             global_step += 1
             img, label = data
             img = img.view(img.size(0), -1)
-            img = Variable(img)
             img = (img.cuda() if torch.cuda.is_available() else img)
-            label = Variable(label)
             label = (label.cuda() if torch.cuda.is_available() else label)
 
             optimizer.zero_grad()
 
             genImg, mu, log_var, preLabel = model(img)
 
-            loss = calLoss(genImg, img, mu, log_var, label, preLabel)
+            loss = cal_loss(genImg, img, mu, log_var, label, preLabel, epoch)
             writer.add_scalar('vae_loss', loss, global_step)
             loss.backward()
             epoch_loss += loss.item()
@@ -186,10 +188,12 @@ if __name__ == '__main__':
             lossFunc = nn.MSELoss(reduction='mean')
             writer.add_scalar('label_loss', lossFunc(label, preLabel), global_step)
 
-        print('====> Epoch: {}/{} Average loss: {:.4f}'.format(epoch, epochsNum, epoch_loss / len(trainData.dataset)))
-
-        writer.add_images('inputs', img.reshape((-1, 1, 128, 128)).repeat_interleave(3, dim=1), global_step)
-        writer.add_images('outputs', genImg.cpu().data.reshape((-1, 1, 128, 128)).repeat_interleave(3, dim=1), global_step)
+            if batch_idx == 0:
+                input_images = img.reshape((-1, 1, 128, 128)).repeat_interleave(3, dim=1)
+                output_images = genImg.reshape((-1, 1, 128, 128)).repeat_interleave(3, dim=1)
+                writer.add_images('inputs', input_images, global_step)
+                writer.add_images('outputs', output_images, global_step)
+                writer.add_images('diff', torch.abs(input_images - output_images), global_step)
 
         # Save model
         torch.save(model.state_dict(), './fishvae.pth')
