@@ -1,20 +1,21 @@
 import logging
+
 import numpy as np
 import torch
-from torch import nn
 import torch.nn.functional as F
-from torch.autograd import Variable
-import torch.utils.data as torchdata
+import torch.utils.data as TorchData
 from tensorboardX import SummaryWriter
+from torch import nn
+from torch.autograd import Variable
 from tqdm import tqdm
-
 
 # Setup
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 logging.basicConfig(format='%(asctime)s %(message)s', handlers=[logging.StreamHandler()])
 
+
 # Data
-class fishDataset(torchdata.Dataset):
+class fishDataset(TorchData.Dataset):
     def __init__(self, x, y):
         self.x = x
         self.y = y
@@ -145,9 +146,9 @@ if __name__ == '__main__':
     label = np.array(fishData['Label'])
 
     dataset = fishDataset(data, label)
-    tmptrain, tmpvalid = torchdata.random_split(dataset, [3000, 775])
-    trainData = torchdata.DataLoader(tmptrain, batch_size=batchSize, num_workers=8)
-    validData = torchdata.DataLoader(tmpvalid, batch_size=batchSize, num_workers=8)
+    tmptrain, tmpvalid = TorchData.random_split(dataset, [3000, 775])
+    trainData = TorchData.DataLoader(tmptrain, batch_size=batchSize, num_workers=8)
+    validData = TorchData.DataLoader(tmpvalid, batch_size=batchSize, num_workers=8)
 
     # Training
     model = VAE()
