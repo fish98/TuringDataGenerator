@@ -1,41 +1,25 @@
-import os
-import datetime
 import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 import torch.utils.data as torchdata
-from torch.utils.data import DataLoader
-from torchvision.utils import save_image
+from tensorboardX import SummaryWriter
+from tqdm import tqdm
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
-if not os.path.exists('./fish_img'):
-    os.mkdir('./fish_img')
+# if not os.path.exists('./fish_img'):
+#     os.mkdir('./fish_img')
+
 
 def toImg(x):
     x = x.clamp(0, 1)
     x = x.view(x.size(0), 1, 128, 128)
     return x
 
-# Parameters
-
-epochsNum = 30000
-batchSize = 60
-learningRate = 0.0005
-
-inputDim = 128*128
-latentDim = 16
-
-# Data Loading
-
-fishData = np.load("fishData128.npy", allow_pickle=True).item()
-data = np.array(fishData['Data'])
-label = np.array(fishData['Label'])
-
+# Data
 class fishDataset(torchdata.Dataset):
-
     def __init__(self, x, y):
         self.x = x
         self.y = y
@@ -52,13 +36,7 @@ class fishDataset(torchdata.Dataset):
     def __len__(self):
         return len(self.idx)
 
-dataset = fishDataset(data, label)
-tmptrain, tmpvalid = torchdata.random_split(dataset, [3000, 775])
-trainData = torchdata.DataLoader(tmptrain, batch_size=batchSize, num_workers=24)
-validData = torchdata.DataLoader(tmpvalid, batch_size=batchSize, num_workers=24)
-
-# Model 
-
+# Model
 class VAE(nn.Module):
     def __init__(self):
         super(VAE, self).__init__()
@@ -72,7 +50,7 @@ class VAE(nn.Module):
         self.reconv1 = nn.ConvTranspose2d(16, 8, 5)
         self.reconv2 = nn.ConvTranspose2d(8, 1, 5)
 
-        self.fc1 = nn.Linear(16 * 40 * 40 , 2048)
+        self.fc1 = nn.Linear(16 * 40 * 40, 2048)
         self.fc11 = nn.Linear(2048, 512)
         self.fc12 = nn.Linear(512, 128)
         self.fc21 = nn.Linear(128, latentDim)
@@ -81,7 +59,7 @@ class VAE(nn.Module):
         self.fc3 = nn.Linear(latentDim, 128)
         self.fc31 = nn.Linear(128, 512)
         self.fc32 = nn.Linear(512, 2048)
-        self.fc4 = nn.Linear(2048, 16*40*40)
+        self.fc4 = nn.Linear(2048, 16 * 40 * 40)
 
         self.convertZ = nn.Linear(latentDim, 4)
 
@@ -90,7 +68,7 @@ class VAE(nn.Module):
         tmp1 = F.relu(self.conv1(x1))
         tmp2 = F.relu(self.conv2(tmp1))
         tmp3, indice = self.maxPool(tmp2)
-        self.indice = indice 
+        self.indice = indice
         tmp3 = F.relu(tmp3)
         x2 = torch.reshape(tmp3, (batchSize, 16 * 40 * 40))
         tmp4 = F.relu(self.fc1(x2))
@@ -130,20 +108,7 @@ class VAE(nn.Module):
         # print(preLabel)
         return self.decode(latent), mu, logvar, preLabel
 
-# Training 
-
-strattime = datetime.datetime.now()
-model = VAE()
-
-if torch.cuda.is_available():
-    # model.cuda()
-    print('cuda is OK!')
-    model = model.to('cuda')
-else:
-    print('cuda is unavailable!')
-
-reconstruction_function = nn.MSELoss(size_average=False)
-
+# Loss
 def calLoss(genImg, img, mu, logvar, label, preLabel):
     ####################################
     # genImg: generating images
@@ -151,6 +116,7 @@ def calLoss(genImg, img, mu, logvar, label, preLabel):
     # mu: latent mean
     # logvar: latent log variance
     ####################################
+    reconstruction_function = nn.MSELoss(size_average=False)
     BCE = reconstruction_function(genImg, img)  # mse loss
     # loss = 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
     KLDElement = mu.pow(2).add_(logvar.exp()).mul_(-1).add_(1).add_(logvar)
@@ -161,50 +127,69 @@ def calLoss(genImg, img, mu, logvar, label, preLabel):
 
     return BCE + KLD + SmoothL * 10
 
-optimizer = torch.optim.Adam(model.parameters(), lr=learningRate)
 
-for epoch in range(epochsNum):
-    model.train()
-    trainLoss = 0
-    
-    for batch_idx, data in enumerate(trainData):    
-        img, label = data
-        # print(label)
-        img = img.view(img.size(0), -1)
-        img = Variable(img)
-        img = (img.cuda() if torch.cuda.is_available() else img)
-        label = Variable(label)
-        label = (label.cuda() if torch.cuda.is_available() else label)
-        
-        optimizer.zero_grad()
-        
-        genImg, mu, logvar, preLabel = model(img)
-        
-        loss = calLoss(genImg, img, mu, logvar, label, preLabel)
-        loss.backward()
-        trainLoss += loss.item()
-        optimizer.step()
+if __name__ == '__main__':
+    # Parameters
+    epochsNum = 30000
+    batchSize = 60
+    learningRate = 0.0005
 
-        if batch_idx % 50 == 0:
-            endtime = datetime.datetime.now()
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f} time:{:.2f}s'.format(
-                epoch,
-                batch_idx * len(img),
-                len(trainData.dataset), 
-                100. * batch_idx / len(trainData),
-                loss.item() / len(img), 
-                (endtime-strattime).seconds))
-    print('====> Epoch: {} Average loss: {:.4f}'.format(epoch, trainLoss / len(trainData.dataset)))
-    
-    if epoch % 5000 == 0:
-        save1 = toImg(img)
-        save2 = toImg(genImg.cpu().data)
-        save_image(save1, './fish_img/image_{}.png'.format(epoch))
-        save_image(save2, './fish_img/original_image_{}.png'.format(epoch))
+    inputDim = 128 * 128
+    latentDim = 16
 
-    if epoch != 0 and epoch % 10 == 0:
-        lossFunc = nn.MSELoss(reduction='mean')
-        print('Training Accuracy: {}'.format(lossFunc(label, preLabel)))
+    # Data Loading
+    fishData = np.load("fishData128.npy", allow_pickle=True).item()
+    data = np.array(fishData['Data'])
+    label = np.array(fishData['Label'])
 
-# Save model
-torch.save(model.state_dict(), './fishvae.pth')
+    dataset = fishDataset(data, label)
+    tmptrain, tmpvalid = torchdata.random_split(dataset, [3000, 775])
+    trainData = torchdata.DataLoader(tmptrain, batch_size=batchSize, num_workers=8)
+    validData = torchdata.DataLoader(tmpvalid, batch_size=batchSize, num_workers=8)
+
+    # Training
+    model = VAE()
+    writer = SummaryWriter()
+
+    if torch.cuda.is_available():
+        print('cuda is OK!')
+        model = model.to('cuda')
+    else:
+        print('cuda is unavailable!')
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=learningRate)
+
+    global_step = 0
+    for epoch in range(epochsNum):
+        model.train()
+        epoch_loss = 0
+
+        for batch_idx, data in tqdm(enumerate(trainData)):
+            global_step += 1
+            img, label = data
+            img = img.view(img.size(0), -1)
+            img = Variable(img)
+            img = (img.cuda() if torch.cuda.is_available() else img)
+            label = Variable(label)
+            label = (label.cuda() if torch.cuda.is_available() else label)
+
+            optimizer.zero_grad()
+
+            genImg, mu, log_var, preLabel = model(img)
+
+            loss = calLoss(genImg, img, mu, log_var, label, preLabel)
+            writer.add_scalar('vae_loss', loss, global_step)
+            loss.backward()
+            epoch_loss += loss.item()
+            optimizer.step()
+
+            lossFunc = nn.MSELoss(reduction='mean')
+            writer.add_scalar('label_loss', lossFunc(label, preLabel), global_step)
+
+        print('====> Epoch: {}/{} Average loss: {:.4f}'.format(epoch, epochsNum, epoch_loss / len(trainData.dataset)))
+
+        writer.add_images('inputs', img.reshape((-1, 1, 128, 128)).repeat_interleave(3, dim=1), global_step)
+        writer.add_images('outputs', genImg.cpu().data.reshape((-1, 1, 128, 128)).repeat_interleave(3, dim=1), global_step)
+
+        # Save model
+        torch.save(model.state_dict(), './fishvae.pth')
