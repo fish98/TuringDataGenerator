@@ -151,10 +151,10 @@ validData = TorchData.DataLoader(tmpvalid, batch_size=batchSize, num_workers=8)
 
 def objective(trial: Trial):
     # Parameters
-    epochsNum = 20
-    learning_rate = trial.suggest_float('lr', 5e-5, 5e-4, log=True)  # 0.0001
+    epochsNum = 40
+    learning_rate = trial.suggest_float('lr', 5e-6, 5e-3, log=True)  # 0.0001
 
-    latent_dim = trial.suggest_int('latent_dim', 4, 32, log=True)  # 16
+    latent_dim = trial.suggest_int('latent_dim', 4, 64, log=True)  # 16
     regress_layer_cnt = trial.suggest_int('regress_layer_count', 2, 6)  # 2
     reg_fc_layer_dim = trial.suggest_int('reg_fc_layer_dim', 8, 32, log=True)  # 20
 
@@ -234,7 +234,7 @@ def objective(trial: Trial):
 
 if __name__ == "__main__":
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=100, timeout=600)
+    study.optimize(objective, n_trials=20, timeout=None)
 
     pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
