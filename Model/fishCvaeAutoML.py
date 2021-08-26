@@ -151,7 +151,7 @@ validData = TorchData.DataLoader(tmpvalid, batch_size=batchSize, num_workers=8)
 
 def objective(trial: Trial):
     # Parameters
-    epochsNum = 40
+    epochsNum = 1000
     learning_rate = trial.suggest_float('lr', 5e-6, 5e-3, log=True)  # 0.0001
 
     latent_dim = trial.suggest_int('latent_dim', 4, 64, log=True)  # 16
@@ -174,6 +174,23 @@ def objective(trial: Trial):
 
     global_step = 0
     val_loss = 0
+
+    # TODO 3
+    AverageData = torch.zeros(1,1,128,128)
+    AverageNumber = 0
+    for batch_idx, data in enumerate(tqdm(trainData)):
+        img, label = data
+        for index, tmpdata in enumerate(range(img.shape[0])):
+            AverageData += img[index]
+            AverageNumber += 1
+    for batch_idx, data in enumerate(tqdm(validData)):
+        img, label = data
+        for index, tmpdata in enumerate(range(img.shape[0])):
+            AverageData += img[index]
+            AverageNumber += 1
+    AverageData = AverageData / AverageNumber
+    AverageData = AverageData.view(AverageData.size(0), -1)
+
     for epoch in range(epochsNum):
         logging.info(f'Executing {epoch}/{epochsNum} epoch')
         epoch_loss = 0
@@ -182,6 +199,7 @@ def objective(trial: Trial):
             global_step += 1
             img, label = data
             img = img.view(img.size(0), -1)
+            img = img - AverageData
             img = (img.cuda() if torch.cuda.is_available() else img)
             label = (label.cuda() if torch.cuda.is_available() else label)
 
@@ -209,6 +227,7 @@ def objective(trial: Trial):
         for val_data in tqdm(validData):
             img, label = val_data
             img = img.view(img.size(0), -1)
+            # img = img - AverageData
             img = (img.cuda() if torch.cuda.is_available() else img)
             label = (label.cuda() if torch.cuda.is_available() else label)
             genImg, mu, log_var, preLabel = model(img)
@@ -234,7 +253,7 @@ def objective(trial: Trial):
 
 if __name__ == "__main__":
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=20, timeout=None)
+    study.optimize(objective, n_trials=40, timeout=None)
 
     pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])

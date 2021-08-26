@@ -43,7 +43,7 @@ class VAE(nn.Module):
         self.conv2 = nn.Conv2d(8, 16, 5)
 
         self.maxPool = nn.MaxPool2d(3, 3, return_indices=True)
-        self.maxUnPool = nn.MaxUnpool2d(3, 3)
+        self.maxUnPool = nn.MaxUnpool2d(3, 3)   
 
         self.reconv1 = nn.ConvTranspose2d(16, 8, 5)
         self.reconv2 = nn.ConvTranspose2d(8, 1, 5)
@@ -61,10 +61,11 @@ class VAE(nn.Module):
 
         # self.convertZ = nn.Linear(latentDim, 4)
         self.convertZ = nn.Sequential(
-            nn.Linear(latentDim, 20),
-            nn.Linear(20, 20),
-            nn.Linear(20, 20),
-            nn.Linear(20, 4),
+            nn.Linear(latentDim, 16),
+            nn.Linear(16, 16),
+            nn.Linear(16, 16),
+            nn.Linear(16, 16),
+            nn.Linear(16, 4),
         )
 
     def encode(self, x):
@@ -129,17 +130,20 @@ def cal_loss(genImg, img, mu, logvar, label, preLabel, epoch):
     # Label loss
     SmoothL = torch.tensor(F.smooth_l1_loss(label, preLabel, reduction='sum'), dtype=torch.double)
 
-    return BCE + KLD + SmoothL * (10 if epoch < 10 else 100)
+    # Add Barrier Loss
+    
+
+    return BCE + KLD + SmoothL * (10 if epoch < 10 else 50)
 
 
 if __name__ == '__main__':
     # Parameters
-    epochsNum = 30000
+    epochsNum = 1000
     batchSize = 60
-    learningRate = 0.0001
+    learningRate = 0.0003
 
     inputDim = 128 * 128
-    latentDim = 16
+    latentDim = 5
 
     # Data Loading
     fishData = np.load("fishData128.npy", allow_pickle=True).item()
@@ -166,6 +170,18 @@ if __name__ == '__main__':
     model.train()
 
     global_step = 0
+
+    # TODO 3
+    AverageData = torch.zeros(1,1,128,128)
+    AverageNumber = 0
+    for batch_idx, data in enumerate(tqdm(trainData)):
+        img, label = data
+        for index, tmpdata in enumerate(range(img.shape[0])):
+            AverageData += img[index]
+            AverageNumber += 1
+    AverageData = AverageData / AverageNumber
+    AverageData = AverageData.view(AverageData.size(0), -1)
+
     for epoch in range(epochsNum):
         logging.info(f'Executing {epoch}/{epochsNum} epoch')
         epoch_loss = 0
@@ -174,6 +190,7 @@ if __name__ == '__main__':
             global_step += 1
             img, label = data
             img = img.view(img.size(0), -1)
+            img = img - AverageData
             img = (img.cuda() if torch.cuda.is_available() else img)
             label = (label.cuda() if torch.cuda.is_available() else label)
 
@@ -196,6 +213,9 @@ if __name__ == '__main__':
                 writer.add_images('inputs', input_images, global_step)
                 writer.add_images('outputs', output_images, global_step)
                 writer.add_images('diff', torch.abs(input_images - output_images), global_step)
-
+        if epoch % 100 == 0:
+            print(label)
+            print(preLabel)
+            print("loss: {}".format(lossFunc(label, preLabel)))
         # Save model
         torch.save(model.state_dict(), './fishvae.pth')

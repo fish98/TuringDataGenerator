@@ -5,7 +5,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-import torch.utils.data as torchdata
+import torch.utils.data as TorchData
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
 
@@ -16,26 +16,25 @@ if not os.path.exists('./fish_img'):
 
 def toImg(x):
     x = x.clamp(0, 1)
-    x = x.view(x.size(0), 1, 64, 64)
+    x = x.view(x.size(0), 1, 128, 128)
     return x
 
 # Parameters
 
-epochsNum = 30000
-batchSize = 32
-learningRate = 0.0005
+epochsNum = 1000
+batchSize = 60
+learningRate = 0.0003
 
-inputDim = 64*64
-latentDim = 20
+inputDim = 128 * 128
+latentDim = 5
 
 # Data Loading
 
-fishData = np.load("fishData64.npy", allow_pickle=True).item()
+fishData = np.load("fishData128.npy", allow_pickle=True).item()
 data = np.array(fishData['Data'])
 label = np.array(fishData['Label'])
 
-class fishDataset(torchdata.Dataset):
-
+class fishDataset(TorchData.Dataset):
     def __init__(self, x, y):
         self.x = x
         self.y = y
@@ -53,31 +52,60 @@ class fishDataset(torchdata.Dataset):
         return len(self.idx)
 
 dataset = fishDataset(data, label)
-tmptrain, tmpvalid = torchdata.random_split(dataset, [3000, 775])
-trainData = torchdata.DataLoader(tmptrain, batch_size=batchSize, num_workers=24)
-validData = torchdata.DataLoader(tmpvalid, batch_size=batchSize, num_workers=24)
+tmptrain, tmpvalid = TorchData.random_split(dataset, [3000, 775])
+trainData = TorchData.DataLoader(tmptrain, batch_size=batchSize, num_workers=24)
+validData = TorchData.DataLoader(tmpvalid, batch_size=batchSize, num_workers=24)
 
 # Model 
 
 class VAE(nn.Module):
     def __init__(self):
         super(VAE, self).__init__()
-        self.fc1 = nn.Linear(inputDim, 800)
-        self.fc11 = nn.Linear(800, 200)
-        self.fc21 = nn.Linear(200, latentDim)
-        self.fc22 = nn.Linear(200, latentDim)
-        self.fc3 = nn.Linear(latentDim, 200)
-        self.fc31 = nn.Linear(200, 800)
-        self.fc4 = nn.Linear(800, inputDim)
-        self.convertZ = nn.Linear(latentDim, 4)
+        self.indice = 0
+        self.conv1 = nn.Conv2d(1, 8, 5)
+        self.conv2 = nn.Conv2d(8, 16, 5)
+
+        self.maxPool = nn.MaxPool2d(3, 3, return_indices=True)
+        self.maxUnPool = nn.MaxUnpool2d(3, 3)   
+
+        self.reconv1 = nn.ConvTranspose2d(16, 8, 5)
+        self.reconv2 = nn.ConvTranspose2d(8, 1, 5)
+
+        self.fc1 = nn.Linear(16 * 40 * 40, 2048)
+        self.fc11 = nn.Linear(2048, 512)
+        self.fc12 = nn.Linear(512, 128)
+        self.fc21 = nn.Linear(128, latentDim)
+        self.fc22 = nn.Linear(128, latentDim)
+
+        self.fc3 = nn.Linear(latentDim, 128)
+        self.fc31 = nn.Linear(128, 512)
+        self.fc32 = nn.Linear(512, 2048)
+        self.fc4 = nn.Linear(2048, 16 * 40 * 40)
+
+        # self.convertZ = nn.Linear(latentDim, 4)
+        self.convertZ = nn.Sequential(
+            nn.Linear(latentDim, 16),
+            nn.Linear(16, 16),
+            nn.Linear(16, 16),
+            nn.Linear(16, 16),
+            nn.Linear(16, 4),
+        )
 
     def encode(self, x):
-        tmp1 = F.relu(self.fc1(x))
-        tmp2 = F.relu(self.fc11(tmp1))
-        return self.fc21(tmp2), self.fc22(tmp2)
+        x1 = torch.reshape(x, (batchSize, 1, 128, 128))
+        tmp1 = F.relu(self.conv1(x1))
+        tmp2 = F.relu(self.conv2(tmp1))
+        tmp3, indice = self.maxPool(tmp2)
+        self.indice = indice
+        tmp3 = F.relu(tmp3)
+        x2 = torch.reshape(tmp3, (batchSize, 16 * 40 * 40))
+        tmp4 = F.relu(self.fc1(x2))
+        tmp5 = F.relu(self.fc11(tmp4))
+        tmp6 = F.relu(self.fc12(tmp5))
+        return self.fc21(tmp6), self.fc22(tmp6)
 
-    def deParametrize(self, mu, logvar):
-        std = logvar.mul(0.5).exp_()
+    def deparametrize(self, mu, log_var):
+        std = log_var.mul(0.5).exp_()
         if torch.cuda.is_available():
             eps = torch.cuda.FloatTensor(std.size()).normal_()
         else:
@@ -86,21 +114,26 @@ class VAE(nn.Module):
         return eps.mul(std).add_(mu)
 
     def decode(self, latent):
-        tmp3 = F.relu(self.fc3(latent))
-        tmp4 = F.relu(self.fc31(tmp3))
-        return torch.sigmoid(self.fc4(tmp4))
+        tmp7 = F.relu(self.fc3(latent))
+        tmp8 = F.relu(self.fc31(tmp7))
+        tmp9 = F.relu(self.fc32(tmp8))
+        tmp10 = F.relu(self.fc4(tmp9))
+        x3 = torch.reshape(tmp10, (batchSize, 16, 40, 40))
+        tmp11 = F.relu(self.maxUnPool(x3, self.indice))
+        tmp12 = F.relu(self.reconv1(tmp11))
+        out = torch.reshape(torch.sigmoid(self.reconv2(tmp12)), (batchSize, 128 * 128))
+        return out
 
-    def convertLantent(self, latent):
+    def convert_lantent(self, latent):
         labels = self.convertZ(latent)
         labels = Variable(labels)
         return labels
 
     def forward(self, x):
-        mu, logvar = self.encode(x)
-        latent = self.deParametrize(mu, logvar)
-        preLabel = self.convertLantent(latent)
-        # print(preLabel)
-        return self.decode(latent), mu, logvar, preLabel
+        mu, log_var = self.encode(x)
+        latent = self.deparametrize(mu, log_var)
+        pre_label = self.convert_lantent(latent)
+        return self.decode(latent), mu, log_var, pre_label
 
 # Training 
 
