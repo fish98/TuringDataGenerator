@@ -12,12 +12,14 @@ from torch.autograd import Variable
 from tqdm import tqdm
 import optuna
 from optuna import Trial
+import os
 
 # Setup
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG, format='%(asctime)s %(message)s')
 
 # Constants
+epochsNum = 20
 inputDim = 128 * 128
 # latentDim = 16
 batchSize = 60
@@ -135,25 +137,23 @@ def cal_loss(genImg, img, mu, logvar, label, preLabel, epoch):
     # Label loss
     SmoothL = torch.tensor(F.smooth_l1_loss(label, preLabel, reduction='sum'), dtype=torch.double)
 
-    return BCE + KLD + SmoothL * (10 if epoch < 5 else 100)
+    return BCE + KLD + SmoothL * (10 if epoch < epochsNum/2 else 20)
 
 
-# Data Loading
-fishData = np.load("fishData128.npy", allow_pickle=True).item()
+# Data Loading // All 23735 Train 23400
+fishData = np.load("newData.npy", allow_pickle=True).item()
 data = np.array(fishData['Data'])
 label = np.array(fishData['Label'])
 
 dataset = fishDataset(data, label)
-tmptrain, tmpvalid = TorchData.random_split(dataset, [3000, 775])
+tmptrain, tmpvalid = TorchData.random_split(dataset, [22800, 935])
 trainData = TorchData.DataLoader(tmptrain, batch_size=batchSize, num_workers=8)
 validData = TorchData.DataLoader(tmpvalid, batch_size=batchSize, num_workers=8)
 
 
 def objective(trial: Trial):
     # Parameters
-    epochsNum = 1000
-    learning_rate = trial.suggest_float('lr', 5e-6, 5e-3, log=True)  # 0.0001
-
+    learning_rate = trial.suggest_float('lr', 5e-5, 5e-3, log=True)  # 0.0001
     latent_dim = trial.suggest_int('latent_dim', 4, 64, log=True)  # 16
     regress_layer_cnt = trial.suggest_int('regress_layer_count', 2, 6)  # 2
     reg_fc_layer_dim = trial.suggest_int('reg_fc_layer_dim', 8, 32, log=True)  # 20
@@ -227,7 +227,7 @@ def objective(trial: Trial):
         for val_data in tqdm(validData):
             img, label = val_data
             img = img.view(img.size(0), -1)
-            # img = img - AverageData
+            img = img - AverageData
             img = (img.cuda() if torch.cuda.is_available() else img)
             label = (label.cuda() if torch.cuda.is_available() else label)
             genImg, mu, log_var, preLabel = model(img)
@@ -253,7 +253,7 @@ def objective(trial: Trial):
 
 if __name__ == "__main__":
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=40, timeout=None)
+    study.optimize(objective, n_trials=80, timeout=None)
 
     pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])

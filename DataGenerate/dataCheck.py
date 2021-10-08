@@ -13,6 +13,7 @@ for index, file in enumerate(dirlist):
     for row in imageArray:
         for col in row:
             bios = bios + abs(col - firstNum)
+            
     if(bios < 20000):
         print("NO ---- process {} out of {}".format(index, len(dirlist)))
         os.remove(file_path)

@@ -9,11 +9,16 @@ from tensorboardX import SummaryWriter
 from torch import nn
 from torch.autograd import Variable
 from tqdm import tqdm
-
+import os
+from torchvision.utils import save_image
 # Setup
-# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG, format='%(asctime)s %(message)s')
 
+def toImg(x):
+    x = x.clamp(0, 1)
+    x = x.view(x.size(0), 1, 128, 128)
+    return x
 
 # Data
 class fishDataset(TorchData.Dataset):
@@ -64,6 +69,7 @@ class VAE(nn.Module):
             nn.Linear(latentDim, 16),
             nn.Linear(16, 16),
             nn.Linear(16, 16),
+            # nn.Linear(16, 16),
             nn.Linear(16, 16),
             nn.Linear(16, 4),
         )
@@ -133,25 +139,28 @@ def cal_loss(genImg, img, mu, logvar, label, preLabel, epoch):
     # Add Barrier Loss
     
 
-    return BCE + KLD + SmoothL * (10 if epoch < 10 else 50)
+    return BCE + KLD + SmoothL * (10 if epoch < 20 else 50)
 
 
 if __name__ == '__main__':
     # Parameters
-    epochsNum = 1000
-    batchSize = 60
+    epochsNum = 40
+    batchSize = 8
     learningRate = 0.0003
 
     inputDim = 128 * 128
-    latentDim = 5
+    latentDim = 6
+
+    # Print Parameters
+    print("Epoch Number: {}\nBatch Size: {}\nLearning Rate: {}\n Input Dimension: {}\nLatent Dimension: {}".format(epochsNum, batchSize, learningRate, inputDim, latentDim))
 
     # Data Loading
-    fishData = np.load("fishData128.npy", allow_pickle=True).item()
+    fishData = np.load("newData.npy", allow_pickle=True).item()
     data = np.array(fishData['Data'])
     label = np.array(fishData['Label'])
 
     dataset = fishDataset(data, label)
-    tmptrain, tmpvalid = TorchData.random_split(dataset, [3000, 775])
+    tmptrain, tmpvalid = TorchData.random_split(dataset, [22800, 935])
     trainData = TorchData.DataLoader(tmptrain, batch_size=batchSize, num_workers=8)
     validData = TorchData.DataLoader(tmpvalid, batch_size=batchSize, num_workers=8)
 
@@ -179,8 +188,13 @@ if __name__ == '__main__':
         for index, tmpdata in enumerate(range(img.shape[0])):
             AverageData += img[index]
             AverageNumber += 1
+    for batch_idx, data in enumerate(tqdm(validData)):
+        img, label = data
+        for index, tmpdata in enumerate(range(img.shape[0])):
+            AverageData += img[index]
+            AverageNumber += 1
     AverageData = AverageData / AverageNumber
-    AverageData = AverageData.view(AverageData.size(0), -1)
+    AverageData = AverageData.view(AverageData.size(0), -1) 
 
     for epoch in range(epochsNum):
         logging.info(f'Executing {epoch}/{epochsNum} epoch')
@@ -193,7 +207,6 @@ if __name__ == '__main__':
             img = img - AverageData
             img = (img.cuda() if torch.cuda.is_available() else img)
             label = (label.cuda() if torch.cuda.is_available() else label)
-
             optimizer.zero_grad()
 
             genImg, mu, log_var, preLabel = model(img)
@@ -213,9 +226,14 @@ if __name__ == '__main__':
                 writer.add_images('inputs', input_images, global_step)
                 writer.add_images('outputs', output_images, global_step)
                 writer.add_images('diff', torch.abs(input_images - output_images), global_step)
-        if epoch % 100 == 0:
+
+        if epoch % 10 == 0:
             print(label)
             print(preLabel)
-            print("loss: {}".format(lossFunc(label, preLabel)))
+            save1 = toImg(img)
+            save2 = toImg(genImg.cpu().data)
+            save_image(save1, './fish_img/image_{}.png'.format(epoch))
+            save_image(save2, './fish_img/original_image_{}.png'.format(epoch))
+        print("loss: {}".format(lossFunc(label, preLabel)))
         # Save model
         torch.save(model.state_dict(), './fishvae.pth')

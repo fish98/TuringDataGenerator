@@ -21,7 +21,7 @@ def toImg(x):
 
 # Parameters
 
-epochsNum = 1000
+epochsNum = 400
 batchSize = 60
 learningRate = 0.0003
 
