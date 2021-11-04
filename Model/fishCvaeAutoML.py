@@ -121,7 +121,7 @@ class VAE(nn.Module):
 
 
 # Loss
-def cal_loss(genImg, img, mu, logvar, label, preLabel, epoch):
+def cal_loss(genImg, img, mu, logvar, label, preLabel, epoch, bp):
     ####################################
     # genImg: generating images
     # Img: origin images
@@ -137,7 +137,7 @@ def cal_loss(genImg, img, mu, logvar, label, preLabel, epoch):
     # Label loss
     SmoothL = torch.tensor(F.smooth_l1_loss(label, preLabel, reduction='sum'), dtype=torch.double)
 
-    return BCE + KLD + SmoothL * (10 if epoch < epochsNum/2 else 20)
+    return BCE + KLD + SmoothL * (10 if epoch < epochsNum/2 else bp)
 
 
 # Data Loading // All 23735 Train 23400
@@ -153,10 +153,12 @@ validData = TorchData.DataLoader(tmpvalid, batch_size=batchSize, num_workers=8)
 
 def objective(trial: Trial):
     # Parameters
-    learning_rate = trial.suggest_float('lr', 5e-5, 5e-3, log=True)  # 0.0001
-    latent_dim = trial.suggest_int('latent_dim', 4, 64, log=True)  # 16
+    learning_rate = trial.suggest_float('lr', 5e-4, 5e-2, log=True)  # 0.0001
+    latent_dim = trial.suggest_int('latent_dim', 8, 32, log=True)  # 16
     regress_layer_cnt = trial.suggest_int('regress_layer_count', 2, 6)  # 2
     reg_fc_layer_dim = trial.suggest_int('reg_fc_layer_dim', 8, 32, log=True)  # 20
+
+    biosPara = trial.suggest_int('bp', 10, 30, log=True)
 
     # Training
     model = VAE(latent_dim, regress_layer_cnt, reg_fc_layer_dim)
@@ -207,7 +209,7 @@ def objective(trial: Trial):
 
             genImg, mu, log_var, preLabel = model(img)
 
-            loss = cal_loss(genImg, img, mu, log_var, label, preLabel, epoch)
+            loss = cal_loss(genImg, img, mu, log_var, label, preLabel, epoch, bp=biosPara)
             writer.add_scalar('vae_loss', loss, global_step)
             loss.backward()
             epoch_loss += loss.item()
@@ -244,7 +246,8 @@ def objective(trial: Trial):
         {'lr': learning_rate,
          'latent_dim': latent_dim,
          'regress_layer_cnt': regress_layer_cnt,
-         'reg_fc_layer_dim': reg_fc_layer_dim},
+         'reg_fc_layer_dim': reg_fc_layer_dim,
+         'bp': biosPara,},
         {'val_loss': val_loss}
     )
 
